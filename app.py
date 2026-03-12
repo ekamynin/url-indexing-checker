@@ -208,7 +208,7 @@ if st.button("Перевірити", type="primary", disabled=(not urls or not c
             pr = page_results_map[r.url]
             row["HTTP статус"] = str(pr.http_status) if pr.http_status else f"Помилка: {pr.error}"
             row["Noindex"]  = "так" if pr.noindex else ("ні" if pr.noindex is False else "—")
-            row["Nofollow"] = pr.nofollow or "—"
+            row["Тип посилання"] = pr.nofollow or "—"
         rows.append(row)
 
     df_results = pd.DataFrame(rows)
