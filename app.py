@@ -30,12 +30,21 @@ with st.sidebar:
     )
 
     if provider == "DataForSEO":
-        api_login = st.text_input(
-            "Login", value=st.session_state.api_login, type="password"
-        )
-        api_password = st.text_input(
-            "Password", value=st.session_state.api_password, type="password"
-        )
+        # 1. secrets → 2. session_state → 3. manual input
+        secret_login    = st.secrets.get("DATAFORSEO_LOGIN", "").encode("ascii", "ignore").decode().strip()
+        secret_password = st.secrets.get("DATAFORSEO_PASSWORD", "").encode("ascii", "ignore").decode().strip()
+
+        if secret_login and secret_password:
+            api_login    = secret_login
+            api_password = secret_password
+            st.success("API credentials з секретів")
+        else:
+            api_login = st.text_input(
+                "Login", value=st.session_state.api_login, type="password"
+            )
+            api_password = st.text_input(
+                "Password", value=st.session_state.api_password, type="password"
+            )
         credentials_ok = bool(api_login and api_password)
 
         if st.button("Тест з'єднання", disabled=not credentials_ok):
