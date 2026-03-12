@@ -25,8 +25,10 @@ with st.sidebar:
     )
 
     if provider == "DataForSEO":
-        default_login    = st.secrets.get("DATAFORSEO_LOGIN", "").strip()
-        default_password = st.secrets.get("DATAFORSEO_PASSWORD", "").strip()
+        import re
+        def clean(s): return re.sub(r"[^\x20-\x7E]", "", s).strip()
+        default_login    = clean(st.secrets.get("DATAFORSEO_LOGIN", ""))
+        default_password = clean(st.secrets.get("DATAFORSEO_PASSWORD", ""))
         if default_login and default_password:
             st.success("API ключ підключено з секретів")
             api_login    = default_login
