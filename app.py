@@ -35,6 +35,25 @@ with st.sidebar:
             api_login    = st.text_input("Login", type="password")
             api_password = st.text_input("Password", type="password")
         credentials_ok = bool(api_login and api_password)
+
+    if credentials_ok and provider == "DataForSEO":
+        if st.button("Тест з'єднання"):
+            import requests, base64
+            creds = base64.b64encode(f"{api_login}:{api_password}".encode()).decode()
+            resp = requests.post(
+                "https://api.dataforseo.com/v3/serp/google/organic/live/regular",
+                headers={"Authorization": f"Basic {creds}", "Content-Type": "application/json"},
+                json=[{"keyword": "site:google.com", "location_code": 2840, "language_code": "en", "depth": 1}],
+            )
+            data = resp.json()
+            code = data.get("status_code")
+            msg  = data.get("status_message")
+            login_len = len(api_login)
+            pass_len  = len(api_password)
+            if code == 20000:
+                st.success(f"OK! login={login_len} chars, pass={pass_len} chars")
+            else:
+                st.error(f"Помилка {code}: {msg} | login={login_len} chars, pass={pass_len} chars")
     else:
         default_key = st.secrets.get("SERPAPI_KEY", "")
         if default_key:
