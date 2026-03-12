@@ -7,11 +7,12 @@ import requests
 import streamlit as st
 
 from checker import DataForSEOChecker, SerpAPIChecker
+from page_checker import check_pages
 
 st.set_page_config(page_title="URL Indexing Checker", layout="wide")
 
 st.title("URL Indexing Checker")
-st.caption("Перевірка індексації сторінок у Google через оператор site:")
+st.caption("Перевірка індексації, HTTP статусу, noindex та nofollow")
 
 # ── Session state init ────────────────────────────────────────────────────────
 if "api_login"    not in st.session_state: st.session_state.api_login    = ""
@@ -30,7 +31,6 @@ with st.sidebar:
     )
 
     if provider == "DataForSEO":
-        # 1. secrets → 2. session_state → 3. manual input
         secret_login    = st.secrets.get("DATAFORSEO_LOGIN", "").encode("ascii", "ignore").decode().strip()
         secret_password = st.secrets.get("DATAFORSEO_PASSWORD", "").encode("ascii", "ignore").decode().strip()
 
@@ -39,12 +39,8 @@ with st.sidebar:
             api_password = secret_password
             st.success("API credentials з секретів")
         else:
-            api_login = st.text_input(
-                "Login", value=st.session_state.api_login, type="password"
-            )
-            api_password = st.text_input(
-                "Password", value=st.session_state.api_password, type="password"
-            )
+            api_login    = st.text_input("Login",    value=st.session_state.api_login,    type="password")
+            api_password = st.text_input("Password", value=st.session_state.api_password, type="password")
         credentials_ok = bool(api_login and api_password)
 
         if st.button("Тест з'єднання", disabled=not credentials_ok):
@@ -77,9 +73,17 @@ with st.sidebar:
         if api_key:
             st.session_state.api_key = api_key
 
-    concurrency = st.slider("Паралельних запитів", 1, 20, 5)
+    st.divider()
+    st.subheader("Перевірка лінків")
+    target_domain = st.text_input(
+        "Ваш домен",
+        placeholder="mysite.com",
+        help="Вкажіть домен вашого сайту для перевірки nofollow. Наприклад: mysite.com",
+    )
+    check_page_meta = st.toggle("Перевіряти HTTP / Noindex / Nofollow", value=True)
 
     st.divider()
+    concurrency = st.slider("Паралельних запитів", 1, 20, 5)
     st.caption("dataforseo.com" if provider == "DataForSEO" else "serpapi.com")
 
 # ── Resolve active credentials ────────────────────────────────────────────────
@@ -132,15 +136,16 @@ st.divider()
 if not credentials_ok and urls:
     st.warning("Введіть API credentials у бічній панелі.")
 
-if st.button("Перевірити індексацію", type="primary",
-             disabled=(not urls or not credentials_ok), use_container_width=True):
+if st.button("Перевірити", type="primary", disabled=(not urls or not credentials_ok), use_container_width=True):
 
+    # — Indexing check —
+    st.write("**Крок 1/2:** Перевірка індексації...")
     progress_bar       = st.progress(0.0)
     status_placeholder = st.empty()
 
     def on_progress(done: int, total: int):
         progress_bar.progress(done / total)
-        status_placeholder.text(f"Перевірено {done} / {total}...")
+        status_placeholder.text(f"Індексація: {done} / {total}...")
 
     if provider == "DataForSEO":
         checker = DataForSEOChecker(active_login, active_password, concurrency)
@@ -148,48 +153,83 @@ if st.button("Перевірити індексацію", type="primary",
         checker = SerpAPIChecker(active_key, concurrency)
 
     try:
-        results = asyncio.run(checker.check_urls(urls, on_progress))
+        index_results = asyncio.run(checker.check_urls(urls, on_progress))
     except RuntimeError:
         import nest_asyncio
         nest_asyncio.apply()
         loop = asyncio.get_event_loop()
-        results = loop.run_until_complete(checker.check_urls(urls, on_progress))
+        index_results = loop.run_until_complete(checker.check_urls(urls, on_progress))
 
     progress_bar.progress(1.0)
     status_placeholder.empty()
 
-    indexed_count = sum(1 for r in results if r.indexed is True)
-    not_indexed   = sum(1 for r in results if r.indexed is False)
-    error_count   = sum(1 for r in results if r.error)
+    # — Page meta check —
+    page_results_map = {}
+    if check_page_meta:
+        st.write("**Крок 2/2:** Перевірка HTTP / Noindex / Nofollow...")
+        progress_bar2      = st.progress(0.0)
+        status_placeholder2 = st.empty()
+
+        def on_progress2(done: int, total: int):
+            progress_bar2.progress(done / total)
+            status_placeholder2.text(f"Сторінки: {done} / {total}...")
+
+        try:
+            page_results = asyncio.run(check_pages(urls, target_domain.strip(), concurrency, on_progress2))
+        except RuntimeError:
+            import nest_asyncio
+            nest_asyncio.apply()
+            loop = asyncio.get_event_loop()
+            page_results = loop.run_until_complete(check_pages(urls, target_domain.strip(), concurrency, on_progress2))
+
+        progress_bar2.progress(1.0)
+        status_placeholder2.empty()
+        page_results_map = {r.url: r for r in page_results}
+
+    # — Summary metrics —
+    indexed_count = sum(1 for r in index_results if r.indexed is True)
+    not_indexed   = sum(1 for r in index_results if r.indexed is False)
+    error_count   = sum(1 for r in index_results if r.error)
 
     m1, m2, m3 = st.columns(3)
     m1.metric("В індексі",    indexed_count)
     m2.metric("Не в індексі", not_indexed)
     m3.metric("Помилки",      error_count)
 
-    def status_label(r):
+    # — Build DataFrame —
+    def index_label(r):
         if r.error:
             return f"Помилка: {r.error}"
         return "в індексі" if r.indexed else "не в індексі"
 
-    df_results = pd.DataFrame({
-        "URL":    [r.url         for r in results],
-        "Статус": [status_label(r) for r in results],
-    })
+    rows = []
+    for r in index_results:
+        row = {"URL": r.url, "Індексація": index_label(r)}
+        if check_page_meta and r.url in page_results_map:
+            pr = page_results_map[r.url]
+            row["HTTP статус"] = str(pr.http_status) if pr.http_status else f"Помилка: {pr.error}"
+            row["Noindex"]     = "так" if pr.noindex else ("ні" if pr.noindex is False else "—")
+            if target_domain:
+                row["Nofollow"] = pr.nofollow or "—"
+        rows.append(row)
 
+    df_results = pd.DataFrame(rows)
+
+    # — Filter & display —
     filter_opt = st.radio("Показати", ["Всі", "в індексі", "не в індексі", "Помилки"], horizontal=True)
 
     if filter_opt == "в індексі":
-        display_df = df_results[df_results["Статус"] == "в індексі"]
+        display_df = df_results[df_results["Індексація"] == "в індексі"]
     elif filter_opt == "не в індексі":
-        display_df = df_results[df_results["Статус"] == "не в індексі"]
+        display_df = df_results[df_results["Індексація"] == "не в індексі"]
     elif filter_opt == "Помилки":
-        display_df = df_results[df_results["Статус"].str.startswith("Помилка")]
+        display_df = df_results[df_results["Індексація"].str.startswith("Помилка")]
     else:
         display_df = df_results
 
     st.dataframe(display_df, use_container_width=True, hide_index=True, height=400)
 
+    # — Export Excel —
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
         df_results.to_excel(writer, index=False, sheet_name="Indexing")
