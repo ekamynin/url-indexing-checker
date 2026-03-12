@@ -25,11 +25,23 @@ with st.sidebar:
     )
 
     if provider == "DataForSEO":
-        api_login = st.text_input("Login", type="password")
-        api_password = st.text_input("Password", type="password")
+        default_login    = st.secrets.get("DATAFORSEO_LOGIN", "")
+        default_password = st.secrets.get("DATAFORSEO_PASSWORD", "")
+        if default_login and default_password:
+            st.success("API ключ підключено з секретів")
+            api_login    = default_login
+            api_password = default_password
+        else:
+            api_login    = st.text_input("Login", type="password")
+            api_password = st.text_input("Password", type="password")
         credentials_ok = bool(api_login and api_password)
     else:
-        api_key = st.text_input("API Key", type="password")
+        default_key = st.secrets.get("SERPAPI_KEY", "")
+        if default_key:
+            st.success("API ключ підключено з секретів")
+            api_key = default_key
+        else:
+            api_key = st.text_input("API Key", type="password")
         credentials_ok = bool(api_key)
 
     concurrency = st.slider(
