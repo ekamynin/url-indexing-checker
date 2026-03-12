@@ -34,6 +34,14 @@ with st.sidebar:
         else:
             api_login    = st.text_input("Login", type="password")
             api_password = st.text_input("Password", type="password")
+
+        st.divider()
+        st.caption("Ручне введення для тесту")
+        manual_login    = st.text_input("Login (вручну)", type="password", key="m_login")
+        manual_password = st.text_input("Password (вручну)", type="password", key="m_pass")
+        if manual_login and manual_password:
+            api_login    = manual_login
+            api_password = manual_password
         credentials_ok = bool(api_login and api_password)
 
     if credentials_ok and provider == "DataForSEO":
