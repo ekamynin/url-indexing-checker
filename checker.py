@@ -30,8 +30,8 @@ class DataForSEOChecker:
     async def _check_one(self, session: aiohttp.ClientSession, url: str) -> CheckResult:
         payload = [{
             "keyword": f"site:{url}",
-            "location_code": 2840,
-            "language_code": "en",
+            "location_code": 2804,
+            "language_code": "uk",
             "depth": 10,
         }]
         try:
@@ -40,8 +40,13 @@ class DataForSEOChecker:
                 if data.get("status_code") != 20000:
                     return CheckResult(url=url, error=data.get("status_message", "API error"))
                 task = data["tasks"][0]
-                if task.get("status_code") != 20000:
-                    return CheckResult(url=url, error=task.get("status_message", "Task error"))
+                task_code = task.get("status_code")
+                task_msg  = task.get("status_message", "")
+                # "No Search Results" means Google found nothing → not indexed
+                if task_code != 20000:
+                    if "no search results" in task_msg.lower():
+                        return CheckResult(url=url, indexed=False)
+                    return CheckResult(url=url, error=task_msg)
                 items_count = task["result"][0].get("items_count", 0)
                 return CheckResult(url=url, indexed=items_count > 0)
         except Exception as e:
