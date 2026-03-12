@@ -60,11 +60,21 @@ def _parse_nofollow(html: str, target_domain: str = "") -> str:
     if not links:
         return "не знайдено"
 
+    results = []
     for link in links:
         rel = link.get("rel") or []
         rel_str = " ".join(rel).lower() if isinstance(rel, list) else str(rel).lower()
-        if any(v in rel_str for v in ("nofollow", "ugc", "sponsored")):
-            return "nofollow"
+        if "sponsored" in rel_str:
+            results.append("sponsored")
+        elif "nofollow" in rel_str or "ugc" in rel_str:
+            results.append("nofollow")
+        else:
+            results.append("dofollow")
+
+    if "sponsored" in results:
+        return "sponsored"
+    if "nofollow" in results:
+        return "nofollow"
     return "dofollow"
 
 
