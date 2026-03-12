@@ -1,20 +1,25 @@
 import asyncio
 import io
+import base64
 
 import pandas as pd
+import requests
 import streamlit as st
 
 from checker import DataForSEOChecker, SerpAPIChecker
 
-st.set_page_config(
-    page_title="URL Indexing Checker",
-    layout="wide",
-)
+st.set_page_config(page_title="URL Indexing Checker", layout="wide")
 
 st.title("URL Indexing Checker")
 st.caption("Перевірка індексації сторінок у Google через оператор site:")
 
-# ── Sidebar ──────────────────────────────────────────────────────────────────
+# ── Session state init ────────────────────────────────────────────────────────
+if "api_login"    not in st.session_state: st.session_state.api_login    = ""
+if "api_password" not in st.session_state: st.session_state.api_password = ""
+if "api_key"      not in st.session_state: st.session_state.api_key      = ""
+if "verified"     not in st.session_state: st.session_state.verified     = False
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("Налаштування API")
 
@@ -25,59 +30,57 @@ with st.sidebar:
     )
 
     if provider == "DataForSEO":
-        import re
-        def clean(s): return re.sub(r"[^\x20-\x7E]", "", s).strip()
-        default_login    = clean(st.secrets.get("DATAFORSEO_LOGIN", ""))
-        default_password = clean(st.secrets.get("DATAFORSEO_PASSWORD", ""))
-        if default_login and default_password:
-            st.success("API ключ підключено з секретів")
-            api_login    = default_login
-            api_password = default_password
-        else:
-            api_login    = st.text_input("Login", type="password")
-            api_password = st.text_input("Password", type="password")
-
+        api_login = st.text_input(
+            "Login", value=st.session_state.api_login, type="password"
+        )
+        api_password = st.text_input(
+            "Password", value=st.session_state.api_password, type="password"
+        )
         credentials_ok = bool(api_login and api_password)
 
-    if credentials_ok and provider == "DataForSEO":
-        if st.button("Тест з'єднання"):
-            import requests, base64
+        if st.button("Тест з'єднання", disabled=not credentials_ok):
             creds = base64.b64encode(f"{api_login}:{api_password}".encode()).decode()
-            resp = requests.post(
-                "https://api.dataforseo.com/v3/serp/google/organic/live/regular",
-                headers={"Authorization": f"Basic {creds}", "Content-Type": "application/json"},
-                json=[{"keyword": "site:google.com", "location_code": 2840, "language_code": "en", "depth": 1}],
-            )
-            data = resp.json()
-            code = data.get("status_code")
-            msg  = data.get("status_message")
-            login_len = len(api_login)
-            pass_len  = len(api_password)
-            if code == 20000:
-                st.success(f"OK! login={login_len} chars, pass={pass_len} chars")
-            else:
-                st.error(f"Помилка {code}: {msg} | login={login_len} chars, pass={pass_len} chars")
+            try:
+                resp = requests.post(
+                    "https://api.dataforseo.com/v3/serp/google/organic/live/regular",
+                    headers={"Authorization": f"Basic {creds}", "Content-Type": "application/json"},
+                    json=[{"keyword": "site:google.com", "location_code": 2840, "language_code": "en", "depth": 1}],
+                    timeout=15,
+                )
+                data = resp.json()
+                if data.get("status_code") == 20000:
+                    st.session_state.api_login    = api_login
+                    st.session_state.api_password = api_password
+                    st.session_state.verified     = True
+                    st.success("З'єднання OK!")
+                else:
+                    st.session_state.verified = False
+                    st.error(f"Помилка {data.get('status_code')}: {data.get('status_message')}")
+            except Exception as e:
+                st.error(f"Помилка: {e}")
+
+        if st.session_state.verified:
+            st.success("Credentials збережено в сесії")
+
     else:
-        default_key = st.secrets.get("SERPAPI_KEY", "")
-        if default_key:
-            st.success("API ключ підключено з секретів")
-            api_key = default_key
-        else:
-            api_key = st.text_input("API Key", type="password")
+        api_key = st.text_input("API Key", value=st.session_state.api_key, type="password")
         credentials_ok = bool(api_key)
+        if api_key:
+            st.session_state.api_key = api_key
 
-    concurrency = st.slider(
-        "Паралельних запитів",
-        min_value=1, max_value=20, value=5,
-        help="Більше — швидше, але вищий ризик rate limit.",
-    )
+    concurrency = st.slider("Паралельних запитів", 1, 20, 5)
 
-    if provider == "DataForSEO":
-        st.divider()
-        st.caption("Реєстрація: dataforseo.com")
-    else:
-        st.divider()
-        st.caption("Реєстрація: serpapi.com")
+    st.divider()
+    st.caption("dataforseo.com" if provider == "DataForSEO" else "serpapi.com")
+
+# ── Resolve active credentials ────────────────────────────────────────────────
+if provider == "DataForSEO":
+    active_login    = api_login
+    active_password = api_password
+    credentials_ok  = bool(active_login and active_password)
+else:
+    active_key     = api_key
+    credentials_ok = bool(active_key)
 
 # ── Input ─────────────────────────────────────────────────────────────────────
 st.subheader("Список URL для перевірки")
@@ -88,13 +91,11 @@ urls: list[str] = []
 
 if input_method == "Текстове поле":
     raw = st.text_area(
-        "По одному URL на рядок",
-        height=250,
-        placeholder="https://donor-site.com/page-with-my-link\nhttps://another-donor.com/article",
+        "По одному URL на рядок", height=250,
+        placeholder="https://donor-site.com/page\nhttps://another-donor.com/article",
     )
     if raw:
         urls = [u.strip() for u in raw.splitlines() if u.strip()]
-
 else:
     uploaded = st.file_uploader("CSV або TXT файл", type=["csv", "txt"])
     if uploaded:
@@ -102,7 +103,8 @@ else:
             df_upload = pd.read_csv(uploaded)
             url_cols = [c for c in df_upload.columns if "url" in c.lower() or "link" in c.lower()]
             default_col = url_cols[0] if url_cols else df_upload.columns[0]
-            col_name = st.selectbox("Колонка з URL", df_upload.columns, index=list(df_upload.columns).index(default_col))
+            col_name = st.selectbox("Колонка з URL", df_upload.columns,
+                                    index=list(df_upload.columns).index(default_col))
             urls = df_upload[col_name].dropna().astype(str).tolist()
         else:
             content = uploaded.read().decode("utf-8")
@@ -112,22 +114,19 @@ else:
 if urls:
     col_a, col_b, col_c = st.columns(3)
     col_a.metric("URL до перевірки", len(urls))
-    if provider == "DataForSEO":
-        col_b.metric("Орієнтовна вартість", f"~${len(urls) * 0.002:.2f}")
-    else:
-        col_b.metric("Запитів SerpAPI", len(urls))
+    col_b.metric("Орієнтовна вартість", f"~${len(urls) * 0.002:.2f}" if provider == "DataForSEO" else f"{len(urls)} запитів")
     col_c.metric("Паралельних потоків", concurrency)
 
 st.divider()
 
 # ── Run ───────────────────────────────────────────────────────────────────────
-run_disabled = not urls or not credentials_ok
 if not credentials_ok and urls:
-    st.warning("Введіть API-ключі у бічній панелі.")
+    st.warning("Введіть API credentials у бічній панелі.")
 
-if st.button("Перевірити індексацію", type="primary", disabled=run_disabled, use_container_width=True):
+if st.button("Перевірити індексацію", type="primary",
+             disabled=(not urls or not credentials_ok), use_container_width=True):
 
-    progress_bar = st.progress(0.0)
+    progress_bar       = st.progress(0.0)
     status_placeholder = st.empty()
 
     def on_progress(done: int, total: int):
@@ -135,14 +134,13 @@ if st.button("Перевірити індексацію", type="primary", disabl
         status_placeholder.text(f"Перевірено {done} / {total}...")
 
     if provider == "DataForSEO":
-        checker = DataForSEOChecker(api_login, api_password, concurrency)
+        checker = DataForSEOChecker(active_login, active_password, concurrency)
     else:
-        checker = SerpAPIChecker(api_key, concurrency)
+        checker = SerpAPIChecker(active_key, concurrency)
 
     try:
         results = asyncio.run(checker.check_urls(urls, on_progress))
     except RuntimeError:
-        # Fallback for environments where event loop already exists
         import nest_asyncio
         nest_asyncio.apply()
         loop = asyncio.get_event_loop()
@@ -151,33 +149,26 @@ if st.button("Перевірити індексацію", type="primary", disabl
     progress_bar.progress(1.0)
     status_placeholder.empty()
 
-    # ── Summary ───────────────────────────────────────────────────────────────
-    indexed_count  = sum(1 for r in results if r.indexed is True)
-    not_indexed    = sum(1 for r in results if r.indexed is False)
-    error_count    = sum(1 for r in results if r.error)
+    indexed_count = sum(1 for r in results if r.indexed is True)
+    not_indexed   = sum(1 for r in results if r.indexed is False)
+    error_count   = sum(1 for r in results if r.error)
 
     m1, m2, m3 = st.columns(3)
-    m1.metric("В індексі",     indexed_count)
-    m2.metric("Не в індексі",  not_indexed)
-    m3.metric("Помилки",       error_count)
+    m1.metric("В індексі",    indexed_count)
+    m2.metric("Не в індексі", not_indexed)
+    m3.metric("Помилки",      error_count)
 
-    # ── Build result DataFrame ─────────────────────────────────────────────────
     def status_label(r):
         if r.error:
             return f"Помилка: {r.error}"
         return "в індексі" if r.indexed else "не в індексі"
 
     df_results = pd.DataFrame({
-        "URL":    [r.url    for r in results],
+        "URL":    [r.url         for r in results],
         "Статус": [status_label(r) for r in results],
     })
 
-    # ── Filter & display ───────────────────────────────────────────────────────
-    filter_opt = st.radio(
-        "Показати",
-        ["Всі", "в індексі", "не в індексі", "Помилки"],
-        horizontal=True,
-    )
+    filter_opt = st.radio("Показати", ["Всі", "в індексі", "не в індексі", "Помилки"], horizontal=True)
 
     if filter_opt == "в індексі":
         display_df = df_results[df_results["Статус"] == "в індексі"]
@@ -190,12 +181,9 @@ if st.button("Перевірити індексацію", type="primary", disabl
 
     st.dataframe(display_df, use_container_width=True, hide_index=True, height=400)
 
-    # ── Export to Excel ────────────────────────────────────────────────────────
     excel_buffer = io.BytesIO()
     with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
         df_results.to_excel(writer, index=False, sheet_name="Indexing")
-
-        # Auto-width columns
         ws = writer.sheets["Indexing"]
         for col_cells in ws.columns:
             max_len = max(len(str(cell.value or "")) for cell in col_cells)
