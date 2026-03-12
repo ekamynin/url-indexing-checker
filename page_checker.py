@@ -19,7 +19,7 @@ class PageCheckResult:
     url: str
     http_status: Optional[int] = None
     noindex: Optional[bool] = None
-    nofollow: Optional[bool] = None
+    nofollow: Optional[str] = None  # dofollow | nofollow | page-nofollow | не знайдено | —
     error: Optional[str] = None
 
 
@@ -34,16 +34,38 @@ def _parse_noindex(html: str) -> bool:
     return False
 
 
-def _parse_nofollow(html: str) -> bool:
-    """Page-level nofollow via meta robots tag."""
+def _parse_nofollow(html: str, target_domain: str = "") -> str:
+    """
+    If target_domain given: find links to that domain and check rel.
+    Returns: "dofollow" | "nofollow" | "не знайдено" | "page-nofollow"
+    """
     soup = BeautifulSoup(html, "html.parser")
+
+    # Page-level nofollow (affects all links)
     for meta in soup.find_all("meta"):
         name = (meta.get("name") or meta.get("property") or "").lower()
         if name in ("robots", "googlebot"):
-            content = meta.get("content", "").lower()
-            if "nofollow" in content:
-                return True
-    return False
+            if "nofollow" in meta.get("content", "").lower():
+                return "page-nofollow"
+
+    if not target_domain:
+        return "—"
+
+    # Find links pointing to target domain
+    domain_clean = target_domain.lower().replace("https://", "").replace("http://", "").strip("/")
+    links = [
+        a for a in soup.find_all("a", href=True)
+        if domain_clean in a["href"].lower()
+    ]
+    if not links:
+        return "не знайдено"
+
+    for link in links:
+        rel = link.get("rel") or []
+        rel_str = " ".join(rel).lower() if isinstance(rel, list) else str(rel).lower()
+        if any(v in rel_str for v in ("nofollow", "ugc", "sponsored")):
+            return "nofollow"
+    return "dofollow"
 
 
 async def _check_one(
@@ -63,7 +85,7 @@ async def _check_one(
                 return PageCheckResult(url=url, http_status=status, error="Не вдалось прочитати HTML")
 
             noindex  = _parse_noindex(html)
-            nofollow = _parse_nofollow(html)
+            nofollow = _parse_nofollow(html, target_domain)
             return PageCheckResult(url=url, http_status=status, noindex=noindex, nofollow=nofollow)
 
     except asyncio.TimeoutError:
@@ -74,6 +96,7 @@ async def _check_one(
 
 async def check_pages(
     urls: list[str],
+    target_domain: str = "",
     concurrency: int = 5,
     progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> list[PageCheckResult]:
@@ -82,7 +105,7 @@ async def check_pages(
 
     async def bounded(url: str):
         async with semaphore:
-            result = await _check_one(session, url, "")
+            result = await _check_one(session, url, target_domain)
         results.append(result)
         if progress_callback:
             progress_callback(len(results), len(urls))

@@ -75,6 +75,11 @@ with st.sidebar:
 
     st.divider()
     check_page_meta = st.toggle("Перевіряти HTTP / Noindex / Nofollow", value=True)
+    target_domain = st.text_input(
+        "Ваш домен (для nofollow)",
+        placeholder="mysite.com",
+        help="Парсер знайде всі посилання на ваш домен і перевірить rel атрибут. Якщо не вказати — покаже тільки page-level nofollow.",
+    )
 
     st.divider()
     concurrency = st.slider("Паралельних запитів", 1, 20, 5)
@@ -169,12 +174,12 @@ if st.button("Перевірити", type="primary", disabled=(not urls or not c
             status_placeholder2.text(f"Сторінки: {done} / {total}...")
 
         try:
-            page_results = asyncio.run(check_pages(urls, concurrency, on_progress2))
+            page_results = asyncio.run(check_pages(urls, target_domain.strip(), concurrency, on_progress2))
         except RuntimeError:
             import nest_asyncio
             nest_asyncio.apply()
             loop = asyncio.get_event_loop()
-            page_results = loop.run_until_complete(check_pages(urls, concurrency, on_progress2))
+            page_results = loop.run_until_complete(check_pages(urls, target_domain.strip(), concurrency, on_progress2))
 
         progress_bar2.progress(1.0)
         status_placeholder2.empty()
@@ -202,8 +207,8 @@ if st.button("Перевірити", type="primary", disabled=(not urls or not c
         if check_page_meta and r.url in page_results_map:
             pr = page_results_map[r.url]
             row["HTTP статус"] = str(pr.http_status) if pr.http_status else f"Помилка: {pr.error}"
-            row["Noindex"]  = "так" if pr.noindex  else ("ні" if pr.noindex  is False else "—")
-            row["Nofollow"] = "так" if pr.nofollow else ("ні" if pr.nofollow is False else "—")
+            row["Noindex"]  = "так" if pr.noindex else ("ні" if pr.noindex is False else "—")
+            row["Nofollow"] = pr.nofollow or "—"
         rows.append(row)
 
     df_results = pd.DataFrame(rows)
