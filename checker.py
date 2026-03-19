@@ -42,6 +42,8 @@ class DataForSEOChecker:
                 except Exception:
                     return CheckResult(url=url, error=f"Невалідна відповідь API (HTTP {resp.status})")
                 if data.get("status_code") != 20000:
+                    if data.get("status_code") == 40203:
+                        return CheckResult(url=url, error="Денний ліміт API вичерпано. Спробуйте завтра.")
                     return CheckResult(url=url, error=data.get("status_message", "API error"))
                 tasks = data.get("tasks") or []
                 if not tasks:
