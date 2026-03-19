@@ -46,10 +46,9 @@ with st.sidebar:
         if st.button("Тест з'єднання", disabled=not credentials_ok):
             creds = base64.b64encode(f"{api_login}:{api_password}".encode()).decode()
             try:
-                resp = requests.post(
-                    "https://api.dataforseo.com/v3/serp/google/organic/live/regular",
-                    headers={"Authorization": f"Basic {creds}", "Content-Type": "application/json"},
-                    json=[{"keyword": "site:google.com", "location_code": 2840, "language_code": "en", "depth": 1}],
+                resp = requests.get(
+                    "https://api.dataforseo.com/v3/appendix/user_data",
+                    headers={"Authorization": f"Basic {creds}"},
                     timeout=15,
                 )
                 data = resp.json()
@@ -82,8 +81,10 @@ with st.sidebar:
     )
 
     st.divider()
-    concurrency = st.slider("Паралельних запитів", 1, 20, 5)
     st.caption("dataforseo.com" if provider == "DataForSEO" else "serpapi.com")
+
+concurrency = 5
+URL_LIMIT = 500
 
 # ── Resolve active credentials ────────────────────────────────────────────────
 if provider == "DataForSEO":
@@ -96,6 +97,7 @@ else:
 
 # ── Input ─────────────────────────────────────────────────────────────────────
 st.subheader("Список URL для перевірки")
+st.caption(f"Максимум {URL_LIMIT} URL за один запуск.")
 
 input_method = st.radio("Спосіб введення", ["Текстове поле", "CSV / TXT файл"], horizontal=True)
 
@@ -122,12 +124,27 @@ else:
             content = uploaded.read().decode("utf-8")
             urls = [u.strip() for u in content.splitlines() if u.strip()]
 
+# ── Deduplicate URLs ──────────────────────────────────────────────────────────
+if urls:
+    unique_urls = list(dict.fromkeys(urls))
+    removed = len(urls) - len(unique_urls)
+    if removed > 0:
+        st.info(f"Знайдено {removed} дублікатів — видалено. Залишилось {len(unique_urls)} унікальних URL.")
+    urls = unique_urls
+
 # ── Info strip ────────────────────────────────────────────────────────────────
 if urls:
-    col_a, col_b, col_c = st.columns(3)
-    col_a.metric("URL до перевірки", len(urls))
-    col_b.metric("Орієнтовна вартість", f"~${len(urls) * 0.002:.2f}" if provider == "DataForSEO" else f"{len(urls)} запитів")
-    col_c.metric("Паралельних потоків", concurrency)
+    if len(urls) > URL_LIMIT:
+        st.error(f"Занадто багато URL: {len(urls)}. Максимум — {URL_LIMIT} за один запуск. Скоротіть список.")
+        urls = []
+    else:
+        estimated_cost = len(urls) * 0.002
+        col_a, col_b = st.columns(2)
+        col_a.metric("URL до перевірки", len(urls))
+        if provider == "DataForSEO":
+            col_b.metric("Орієнтовна вартість", f"~${estimated_cost:.2f}")
+        else:
+            col_b.metric("Запитів", len(urls))
 
 st.divider()
 
@@ -136,6 +153,29 @@ if not credentials_ok and urls:
     st.warning("Введіть API credentials у бічній панелі.")
 
 if st.button("Перевірити", type="primary", disabled=(not urls or not credentials_ok), use_container_width=True):
+
+    # — Balance check (DataForSEO only) —
+    if provider == "DataForSEO":
+        try:
+            creds = base64.b64encode(f"{active_login}:{active_password}".encode()).decode()
+            resp_balance = requests.get(
+                "https://api.dataforseo.com/v3/appendix/user_data",
+                headers={"Authorization": f"Basic {creds}"},
+                timeout=10,
+            )
+            balance_data = resp_balance.json()
+            balance = (
+                ((balance_data.get("tasks") or [{}])[0].get("result") or [{}])[0]
+                .get("money", {}).get("balance", None)
+            )
+            estimated_cost = len(urls) * 0.002
+            if balance is not None:
+                if balance < estimated_cost:
+                    st.warning(f"Увага: баланс ${balance:.2f}, а запуск коштує ~${estimated_cost:.2f}. Частина URL може не перевіритись.")
+                else:
+                    st.caption(f"Баланс: ${balance:.2f} / Вартість запуску: ~${estimated_cost:.2f}")
+        except Exception:
+            pass  # не блокуємо запуск якщо перевірка балансу не вдалась
 
     # — Indexing check —
     st.write("**Крок 1/2:** Перевірка індексації...")

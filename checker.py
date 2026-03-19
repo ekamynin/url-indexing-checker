@@ -35,20 +35,29 @@ class DataForSEOChecker:
             "depth": 10,
         }]
         try:
-            async with session.post(self.BASE_URL, json=payload, headers=self._get_headers()) as resp:
-                data = await resp.json()
+            timeout = aiohttp.ClientTimeout(total=30)
+            async with session.post(self.BASE_URL, json=payload, headers=self._get_headers(), timeout=timeout) as resp:
+                try:
+                    data = await resp.json(content_type=None)
+                except Exception:
+                    return CheckResult(url=url, error=f"Невалідна відповідь API (HTTP {resp.status})")
                 if data.get("status_code") != 20000:
                     return CheckResult(url=url, error=data.get("status_message", "API error"))
-                task = data["tasks"][0]
+                tasks = data.get("tasks") or []
+                if not tasks:
+                    return CheckResult(url=url, error="Порожня відповідь tasks")
+                task = tasks[0]
                 task_code = task.get("status_code")
                 task_msg  = task.get("status_message", "")
-                # "No Search Results" means Google found nothing → not indexed
                 if task_code != 20000:
                     if "no search results" in task_msg.lower():
                         return CheckResult(url=url, indexed=False)
                     return CheckResult(url=url, error=task_msg)
-                items_count = task["result"][0].get("items_count", 0)
+                result = (task.get("result") or [{}])[0]
+                items_count = result.get("items_count", 0)
                 return CheckResult(url=url, indexed=items_count > 0)
+        except asyncio.TimeoutError:
+            return CheckResult(url=url, error="Timeout (30s)")
         except Exception as e:
             return CheckResult(url=url, error=str(e))
 
