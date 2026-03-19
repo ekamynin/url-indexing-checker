@@ -1,10 +1,35 @@
 import asyncio
 import io
 import base64
+import re
+from urllib.parse import urlparse
 
 import pandas as pd
 import requests
 import streamlit as st
+
+# ── URL validation ─────────────────────────────────────────────────────────────
+_PRIVATE_HOST = re.compile(
+    r'^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|metadata\.google\.internal)',
+    re.IGNORECASE,
+)
+
+def _is_valid_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        host = parsed.hostname or ""
+        if not host or _PRIVATE_HOST.match(host):
+            return False
+        return True
+    except Exception:
+        return False
+
+def _sanitize_excel_cell(value):
+    if isinstance(value, str) and value.startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value
 
 from checker import DataForSEOChecker, SerpAPIChecker
 from page_checker import check_pages
@@ -120,9 +145,15 @@ else:
             col_name = st.selectbox("Колонка з URL", df_upload.columns,
                                     index=list(df_upload.columns).index(default_col))
             urls = df_upload[col_name].dropna().astype(str).tolist()
+            if len(urls) > URL_LIMIT:
+                st.error(f"CSV містить {len(urls)} URL. Максимум — {URL_LIMIT}. Скоротіть файл.")
+                urls = []
         else:
             content = uploaded.read().decode("utf-8")
             urls = [u.strip() for u in content.splitlines() if u.strip()]
+            if len(urls) > URL_LIMIT:
+                st.error(f"TXT містить {len(urls)} URL. Максимум — {URL_LIMIT}. Скоротіть файл.")
+                urls = []
 
 # ── Deduplicate URLs ──────────────────────────────────────────────────────────
 if urls:
@@ -131,6 +162,14 @@ if urls:
     if removed > 0:
         st.info(f"Знайдено {removed} дублікатів — видалено. Залишилось {len(unique_urls)} унікальних URL.")
     urls = unique_urls
+
+# ── Validate URLs ─────────────────────────────────────────────────────────────
+if urls:
+    valid_urls = [u for u in urls if _is_valid_url(u)]
+    invalid_count = len(urls) - len(valid_urls)
+    if invalid_count > 0:
+        st.warning(f"Відфільтровано {invalid_count} рядків: не http/https або приватні адреси.")
+    urls = valid_urls
 
 # ── Info strip ────────────────────────────────────────────────────────────────
 if urls:
@@ -269,8 +308,9 @@ if st.button("Перевірити", type="primary", disabled=(not urls or not c
 
     # — Export Excel —
     excel_buffer = io.BytesIO()
+    df_export = df_results.apply(lambda col: col.map(_sanitize_excel_cell))
     with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
-        df_results.to_excel(writer, index=False, sheet_name="Indexing")
+        df_export.to_excel(writer, index=False, sheet_name="Indexing")
         ws = writer.sheets["Indexing"]
         for col_cells in ws.columns:
             max_len = max(len(str(cell.value or "")) for cell in col_cells)
