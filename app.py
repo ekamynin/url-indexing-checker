@@ -123,6 +123,8 @@ with st.sidebar:
         placeholder="mysite.com",
         help="Парсер знайде всі посилання на ваш домен і перевірить rel атрибут. Якщо не вказати — покаже тільки page-level nofollow.",
     )
+    if check_page_meta and not target_domain.strip():
+        st.caption("ℹ️ Без домену колонка «Тип посилання» буде порожньою.")
 
     st.divider()
     st.caption("dataforseo.com" if provider == "DataForSEO" else "serpapi.com")
