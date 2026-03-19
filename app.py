@@ -61,6 +61,8 @@ if "api_password" not in st.session_state: st.session_state.api_password = ""
 if "api_key"      not in st.session_state: st.session_state.api_key      = ""
 if "verified"     not in st.session_state: st.session_state.verified     = False
 if "running"      not in st.session_state: st.session_state.running      = False
+if "df_results"   not in st.session_state: st.session_state.df_results   = None
+if "summary"      not in st.session_state: st.session_state.summary      = None
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -296,17 +298,7 @@ if st.button(
         status_placeholder2.empty()
         page_results_map = {r.url: r for r in page_results}
 
-    # — Summary metrics —
-    indexed_count = sum(1 for r in index_results if r.indexed is True)
-    not_indexed   = sum(1 for r in index_results if r.indexed is False)
-    error_count   = sum(1 for r in index_results if r.error)
-
-    m1, m2, m3 = st.columns(3)
-    m1.metric("В індексі",    indexed_count)
-    m2.metric("Не в індексі", not_indexed)
-    m3.metric("Помилки",      error_count)
-
-    # — Build DataFrame —
+    # — Build DataFrame & save to session state —
     def index_label(r):
         if r.error:
             return f"Помилка: {r.error}"
@@ -322,9 +314,24 @@ if st.button(
             row["Тип посилання"] = pr.nofollow or "—"
         rows.append(row)
 
-    df_results = pd.DataFrame(rows)
+    st.session_state.df_results = pd.DataFrame(rows)
+    st.session_state.summary = {
+        "indexed":     sum(1 for r in index_results if r.indexed is True),
+        "not_indexed": sum(1 for r in index_results if r.indexed is False),
+        "errors":      sum(1 for r in index_results if r.error),
+    }
+    st.session_state.running = False
 
-    # — Filter & display —
+# ── Results ───────────────────────────────────────────────────────────────────
+if st.session_state.df_results is not None:
+    s = st.session_state.summary
+    m1, m2, m3 = st.columns(3)
+    m1.metric("В індексі",    s["indexed"])
+    m2.metric("Не в індексі", s["not_indexed"])
+    m3.metric("Помилки",      s["errors"])
+
+    df_results = st.session_state.df_results
+
     filter_opt = st.radio("Показати", ["Всі", "в індексі", "не в індексі", "Помилки"], horizontal=True)
 
     if filter_opt == "в індексі":
@@ -355,5 +362,3 @@ if st.button(
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
-
-    st.session_state.running = False
