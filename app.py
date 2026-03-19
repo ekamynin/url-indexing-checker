@@ -15,6 +15,8 @@ _PRIVATE_HOST = re.compile(
 )
 
 def _is_valid_url(url: str) -> bool:
+    if len(url) > 2000:
+        return False
     try:
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
@@ -44,6 +46,7 @@ if "api_login"    not in st.session_state: st.session_state.api_login    = ""
 if "api_password" not in st.session_state: st.session_state.api_password = ""
 if "api_key"      not in st.session_state: st.session_state.api_key      = ""
 if "verified"     not in st.session_state: st.session_state.verified     = False
+if "running"      not in st.session_state: st.session_state.running      = False
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -138,7 +141,9 @@ if input_method == "Текстове поле":
 else:
     uploaded = st.file_uploader("CSV або TXT файл", type=["csv", "txt"])
     if uploaded:
-        if uploaded.name.endswith(".csv"):
+        if uploaded.size > 5 * 1024 * 1024:
+            st.error("Файл завеликий. Максимум — 5MB.")
+        elif uploaded.name.endswith(".csv"):
             df_upload = pd.read_csv(uploaded)
             url_cols = [c for c in df_upload.columns if "url" in c.lower() or "link" in c.lower()]
             default_col = url_cols[0] if url_cols else df_upload.columns[0]
@@ -193,7 +198,16 @@ st.divider()
 if not credentials_ok and urls:
     st.warning("Введіть API credentials у бічній панелі.")
 
-if st.button("Перевірити", type="primary", disabled=(not urls or not credentials_ok), use_container_width=True):
+def _start_running():
+    st.session_state.running = True
+
+if st.button(
+    "Перевірити",
+    type="primary",
+    disabled=(not urls or not credentials_ok or st.session_state.running),
+    on_click=_start_running,
+    use_container_width=True,
+):
 
     # — Balance check (DataForSEO only) —
     if provider == "DataForSEO":
@@ -325,3 +339,5 @@ if st.button("Перевірити", type="primary", disabled=(not urls or not c
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
+
+    st.session_state.running = False
