@@ -73,7 +73,10 @@ def _parse_nofollow(html: str, target_domain: str = "") -> str:
 
     if "sponsored" in results:
         return "sponsored"
-    if "nofollow" in results:
+    unique = set(results)
+    if len(unique) > 1:
+        return "змішано"
+    if "nofollow" in unique:
         return "nofollow"
     return "dofollow"
 
