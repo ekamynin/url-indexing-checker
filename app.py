@@ -160,7 +160,8 @@ if urls:
     unique_urls = list(dict.fromkeys(urls))
     removed = len(urls) - len(unique_urls)
     if removed > 0:
-        st.info(f"Знайдено {removed} дублікатів — видалено. Залишилось {len(unique_urls)} унікальних URL.")
+        word = "дублікат" if removed == 1 else "дублікати" if 2 <= removed <= 4 else "дублікатів"
+        st.info(f"Знайдено {removed} {word} — видалено. Залишилось {len(unique_urls)} унікальних URL.")
     urls = unique_urls
 
 # ── Validate URLs ─────────────────────────────────────────────────────────────
@@ -168,7 +169,8 @@ if urls:
     valid_urls = [u for u in urls if _is_valid_url(u)]
     invalid_count = len(urls) - len(valid_urls)
     if invalid_count > 0:
-        st.warning(f"Відфільтровано {invalid_count} рядків: не http/https або приватні адреси.")
+        word = "рядок" if invalid_count == 1 else "рядки" if 2 <= invalid_count <= 4 else "рядків"
+        st.warning(f"Відфільтровано {invalid_count} {word}: не http/https або приватні адреси.")
     urls = valid_urls
 
 # ── Info strip ────────────────────────────────────────────────────────────────
