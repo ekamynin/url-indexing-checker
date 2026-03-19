@@ -28,6 +28,20 @@ def _is_valid_url(url: str) -> bool:
     except Exception:
         return False
 
+def _split_raw_urls(raw: str) -> list[str]:
+    """Split text where URLs may be concatenated without separators."""
+    urls = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = re.split(r'(?=https?://)', line)
+        for part in parts:
+            part = part.strip()
+            if part:
+                urls.append(part)
+    return urls
+
 def _sanitize_excel_cell(value):
     if isinstance(value, str) and value.startswith(("=", "+", "-", "@")):
         return "'" + value
@@ -137,7 +151,7 @@ if input_method == "Текстове поле":
         placeholder="https://donor-site.com/page\nhttps://another-donor.com/article",
     )
     if raw:
-        urls = [u.strip() for u in raw.splitlines() if u.strip()]
+        urls = _split_raw_urls(raw)
 else:
     uploaded = st.file_uploader("CSV або TXT файл", type=["csv", "txt"])
     if uploaded:
@@ -145,17 +159,19 @@ else:
             st.error("Файл завеликий. Максимум — 5MB.")
         elif uploaded.name.endswith(".csv"):
             df_upload = pd.read_csv(uploaded)
-            url_cols = [c for c in df_upload.columns if "url" in c.lower() or "link" in c.lower()]
-            default_col = url_cols[0] if url_cols else df_upload.columns[0]
-            col_name = st.selectbox("Колонка з URL", df_upload.columns,
-                                    index=list(df_upload.columns).index(default_col))
-            urls = df_upload[col_name].dropna().astype(str).tolist()
-            if len(urls) > URL_LIMIT:
+            all_cells = df_upload.values.flatten()
+            urls = [
+                str(cell).strip() for cell in all_cells
+                if pd.notna(cell) and str(cell).strip().startswith(("http://", "https://"))
+            ]
+            if not urls:
+                st.warning("У CSV не знайдено жодного URL що починається з http:// або https://")
+            elif len(urls) > URL_LIMIT:
                 st.error(f"CSV містить {len(urls)} URL. Максимум — {URL_LIMIT}. Скоротіть файл.")
                 urls = []
         else:
             content = uploaded.read().decode("utf-8")
-            urls = [u.strip() for u in content.splitlines() if u.strip()]
+            urls = _split_raw_urls(content)
             if len(urls) > URL_LIMIT:
                 st.error(f"TXT містить {len(urls)} URL. Максимум — {URL_LIMIT}. Скоротіть файл.")
                 urls = []
